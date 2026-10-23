@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agy-federation-mesh"
+version = "1.0.0"
+description = "Tier L5 Cross-Station Swarm Orchestrator & DAG Execution Mesh"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Obscured-grey", email = "obscured-grey@users.noreply.github.com" }
+]
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+    "pydantic>=2.0.0"
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "httpx>=0.24.0"
+]
+
+[project.scripts]
+agy-federation-mesh = "agy_federation_mesh.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
