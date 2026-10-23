@@ -3,6 +3,7 @@
     "agy-federation-mesh-router": {
       "command": "python",
       "args": ["-m", "agy_federation_mesh.cli", "topology", "--json"],
+      "timeout_ms": 15000,
       "tools": [
         "discover_topology",
         "dispatch_cross_station_dag",

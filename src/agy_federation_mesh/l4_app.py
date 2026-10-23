@@ -29,6 +29,13 @@ app = FastAPI(
     description="Tier L5 Federated Cross-Station Mesh Controller & Cockpit",
 )
 
+
+@app.get("/health")
+@app.get("/healthz")
+async def health_check() -> dict[str, str]:
+    """Standard health check endpoint."""
+    return {"status": "ok", "station": "federation_mesh", "tier": "L5"}
+
 _orchestrator = FederationMeshOrchestrator()
 
 
