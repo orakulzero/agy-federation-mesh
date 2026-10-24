@@ -113,6 +113,55 @@ class DAGPipelineEngine:
 
         return topological_order
 
+    @staticmethod
+    def compute_execution_waves(tasks: list[WorkflowTask]) -> list[list[str]]:
+        """Partition tasks into independent topological execution waves.
+
+        Tasks within each wave have all dependencies satisfied by preceding waves
+        and can be executed concurrently in parallel worker pools.
+
+        Raises:
+            ValueError: If a task references an unknown dependency ID.
+            ValueError: If a cyclic dependency is detected in the graph.
+        """
+        task_map: dict[str, WorkflowTask] = {t.task_id: t for t in tasks}
+
+        for t in tasks:
+            for dep in t.depends_on:
+                if dep not in task_map:
+                    raise ValueError(f"Task '{t.task_id}' references unknown dependency: '{dep}'")
+
+        in_degree: dict[str, int] = {t.task_id: 0 for t in tasks}
+        adjacency: dict[str, list[str]] = {t.task_id: [] for t in tasks}
+
+        for t in tasks:
+            for dep in t.depends_on:
+                adjacency[dep].append(t.task_id)
+                in_degree[t.task_id] += 1
+
+        current_wave: list[str] = [t_id for t_id, deg in in_degree.items() if deg == 0]
+        waves: list[list[str]] = []
+        visited_count = 0
+
+        while current_wave:
+            current_wave.sort()
+            waves.append(list(current_wave))
+            visited_count += len(current_wave)
+            next_wave: list[str] = []
+
+            for task_id in current_wave:
+                for neighbor in adjacency[task_id]:
+                    in_degree[neighbor] -= 1
+                    if in_degree[neighbor] == 0:
+                        next_wave.append(neighbor)
+
+            current_wave = next_wave
+
+        if visited_count != len(tasks):
+            raise ValueError("Cyclic dependency detected in task graph")
+
+        return waves
+
 
 def compute_mesh_digest(nodes: list[StationNode]) -> str:
     """Compute a deterministic 64-char SHA-256 fingerprint for active mesh topology."""

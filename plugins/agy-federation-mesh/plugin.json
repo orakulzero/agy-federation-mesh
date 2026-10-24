@@ -2,7 +2,7 @@
   "name": "agy-federation-mesh",
   "displayName": "AGY Federation Mesh",
   "description": "Federated multi-station cross-workstation DAG pipeline orchestrator and swarm router.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "logo": "assets/logo.svg",
   "suggestedPrompts": [
     "Discover active mesh station topology",
