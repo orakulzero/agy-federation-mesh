@@ -522,3 +522,146 @@ def test_v1_2_hypothesis_load_balancer_selection_invariants(latencies, inflights
     selected_score = (selected.latency_ema_ms * (1 + selected.inflight_count)) / selected.weight
 
     assert pytest.approx(selected_score, rel=1e-5) == min_score
+
+
+# ============================================================================
+# 6. Remediation Regression Tests (Defects 1, 2, 3)
+# ============================================================================
+
+def test_v1_2_remediation_offline_recovery_to_online_on_success():
+    """Verify that success=True restores OFFLINE and DEGRADED replicas to ONLINE."""
+    lb = StationLoadBalancer()
+    r_offline = StationReplica(
+        base_url="http://127.0.0.1:9601",
+        station_id="test_station",
+        status="OFFLINE",
+        consecutive_failures=5,
+    )
+    r_degraded = StationReplica(
+        base_url="http://127.0.0.1:9602",
+        station_id="test_station",
+        status="DEGRADED",
+        consecutive_failures=3,
+    )
+    lb.add_replica(r_offline)
+    lb.add_replica(r_degraded)
+
+    # Success on OFFLINE replica restores to ONLINE
+    lb.record_telemetry("http://127.0.0.1:9601", duration_ms=15.0, success=True)
+    assert r_offline.status == "ONLINE"
+    assert r_offline.consecutive_failures == 0
+
+    # Success on DEGRADED replica restores to ONLINE
+    lb.record_telemetry("http://127.0.0.1:9602", duration_ms=15.0, success=True)
+    assert r_degraded.status == "ONLINE"
+    assert r_degraded.consecutive_failures == 0
+
+
+def test_v1_2_remediation_failure_while_offline_never_promotes_to_degraded():
+    """Verify that failures while OFFLINE never promote or transition a replica to DEGRADED."""
+    lb = StationLoadBalancer()
+    # Replica starting OFFLINE with 0 consecutive failures
+    r = StationReplica(
+        base_url="http://127.0.0.1:9603",
+        station_id="test_station",
+        status="OFFLINE",
+        consecutive_failures=0,
+    )
+    lb.add_replica(r)
+
+    # 1st failure: remains OFFLINE
+    lb.record_telemetry(r.base_url, duration_ms=25.0, success=False)
+    assert r.status == "OFFLINE"
+    assert r.consecutive_failures == 1
+
+    # 2nd failure: MUST remain OFFLINE (never promoted to DEGRADED)
+    lb.record_telemetry(r.base_url, duration_ms=25.0, success=False)
+    assert r.status == "OFFLINE"
+    assert r.consecutive_failures == 2
+
+    # 3rd and 4th failures: remain OFFLINE
+    lb.record_telemetry(r.base_url, duration_ms=25.0, success=False)
+    lb.record_telemetry(r.base_url, duration_ms=25.0, success=False)
+    assert r.status == "OFFLINE"
+    assert r.consecutive_failures == 4
+
+    # 5th failure: remains OFFLINE
+    lb.record_telemetry(r.base_url, duration_ms=25.0, success=False)
+    assert r.status == "OFFLINE"
+    assert r.consecutive_failures == 5
+
+
+def test_v1_2_remediation_dag_exporters_handle_none_and_non_dict_results():
+    """Verify export_dag_mermaid and export_dag_dot safely handle None, bool, and non-dict execution_results."""
+    tasks = [
+        WorkflowTask(task_id="step_none", station_id="st1", action="act1", payload={}),
+        WorkflowTask(task_id="step_bool_t", station_id="st2", action="act2", payload={}),
+        WorkflowTask(task_id="step_bool_f", station_id="st3", action="act3", payload={}),
+        WorkflowTask(task_id="step_custom", station_id="st4", action="act4", payload={}),
+    ]
+    results = {
+        "step_none": None,
+        "step_bool_t": True,
+        "step_bool_f": False,
+        "step_custom": "SKIPPED",
+    }
+
+    # Mermaid export
+    mermaid = export_dag_mermaid(tasks, execution_results=results)
+    assert "step_none: st1/act1 [UNKNOWN]" in mermaid
+    assert "step_bool_t: st2/act2 [COMPLETED]" in mermaid
+    assert "step_bool_f: st3/act3 [FAILED]" in mermaid
+    assert "step_custom: st4/act4 [SKIPPED]" in mermaid
+
+    # DOT export
+    dot = export_dag_dot(tasks, execution_results=results)
+    assert "status: UNKNOWN" in dot
+    assert "status: COMPLETED" in dot
+    assert "status: FAILED" in dot
+    assert "status: SKIPPED" in dot
+
+    # FastAPI endpoint test client validation
+    client = TestClient(app)
+    resp_mermaid = client.post(
+        "/api/federation/dag/export",
+        json={
+            "tasks": [{"task_id": "t1", "station_id": "st", "action": "act", "depends_on": []}],
+            "format": "mermaid",
+            "execution_results": {"t1": None},
+        },
+    )
+    assert resp_mermaid.status_code == 200
+    assert "[UNKNOWN]" in resp_mermaid.json()["content"]
+
+    resp_dot = client.post(
+        "/api/federation/dag/export",
+        json={
+            "tasks": [{"task_id": "t1", "station_id": "st", "action": "act", "depends_on": []}],
+            "format": "dot",
+            "execution_results": {"t1": None},
+        },
+    )
+    assert resp_dot.status_code == 200
+    assert "status: UNKNOWN" in resp_dot.json()["content"]
+
+
+def test_v1_2_remediation_export_dag_dot_escapes_quotes_and_backslashes():
+    """Verify export_dag_dot properly escapes double quotes and backslashes in node labels."""
+    tasks = [
+        WorkflowTask(
+            task_id="task_quotes",
+            station_id="station_test",
+            action='deep "nested" scan',
+            payload={},
+        ),
+    ]
+
+    dot = export_dag_dot(tasks)
+    matching_lines = [l.strip() for l in dot.splitlines() if "task_quotes" in l and "label=" in l]
+    assert len(matching_lines) == 1
+    label_line = matching_lines[0]
+
+    # Double quotes inside label must be escaped as \"
+    assert r'\"nested\"' in label_line
+    # Emitted line must have balanced outer label="..." quotes
+    assert label_line.endswith('"];')

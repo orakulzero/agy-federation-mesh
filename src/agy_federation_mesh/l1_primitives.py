@@ -277,14 +277,15 @@ class StationLoadBalancer:
 
         if success:
             target.consecutive_failures = 0
-            if target.status == "DEGRADED":
+            if target.status in ("DEGRADED", "OFFLINE"):
                 target.status = "ONLINE"
         else:
             target.consecutive_failures += 1
             if target.consecutive_failures >= 5:
                 target.status = "OFFLINE"
             elif target.consecutive_failures >= 2:
-                target.status = "DEGRADED"
+                if target.status != "OFFLINE":
+                    target.status = "DEGRADED"
 
 
 def export_dag_mermaid(
@@ -309,7 +310,14 @@ def export_dag_mermaid(
             t = task_map[tid]
             if execution_results and tid in execution_results:
                 res = execution_results[tid]
-                status = "COMPLETED" if res.get("ok", True) else "FAILED"
+                if isinstance(res, dict):
+                    status = "COMPLETED" if res.get("ok", True) else "FAILED"
+                elif isinstance(res, bool):
+                    status = "COMPLETED" if res else "FAILED"
+                elif res is None:
+                    status = "UNKNOWN"
+                else:
+                    status = str(res)
                 node_label = f"{t.task_id}: {t.station_id}/{t.action} [{status}]"
             else:
                 node_label = f"{t.task_id}: {t.station_id}/{t.action}"
@@ -356,11 +364,19 @@ def export_dag_dot(
             t = task_map[tid]
             if execution_results and tid in execution_results:
                 res = execution_results[tid]
-                status = "COMPLETED" if res.get("ok", True) else "FAILED"
+                if isinstance(res, dict):
+                    status = "COMPLETED" if res.get("ok", True) else "FAILED"
+                elif isinstance(res, bool):
+                    status = "COMPLETED" if res else "FAILED"
+                elif res is None:
+                    status = "UNKNOWN"
+                else:
+                    status = str(res)
                 node_label = f"{t.task_id}\\nstation: {t.station_id}\\naction: {t.action}\\nstatus: {status}"
             else:
                 node_label = f"{t.task_id}\\nstation: {t.station_id}\\naction: {t.action}"
-            lines.append(f"    \"{tid}\" [label=\"{node_label}\"];")
+            safe_label = node_label.replace("\\", "\\\\").replace('"', '\\"')
+            lines.append(f"    \"{tid}\" [label=\"{safe_label}\"];")
         lines.append("  }")
 
     edge_pairs: list[tuple[str, str]] = []
