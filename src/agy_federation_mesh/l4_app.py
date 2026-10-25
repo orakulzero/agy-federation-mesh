@@ -20,12 +20,14 @@ from .l1_primitives import (
     StationNode,
     WorkflowTask,
     compute_mesh_digest,
+    export_dag_dot,
+    export_dag_mermaid,
 )
 from .l3_pipeline import FederationMeshOrchestrator
 
 app = FastAPI(
     title="AGY Federation Mesh Command Matrix",
-    version="1.0.0",
+    version="1.2.0",
     description="Tier L5 Federated Cross-Station Mesh Controller & Cockpit",
 )
 
@@ -42,6 +44,21 @@ _orchestrator = FederationMeshOrchestrator()
 class WorkflowRunRequest(BaseModel):
     workflow_name: str
     payload: Optional[dict[str, Any]] = None
+
+
+class DAGExportRequest(BaseModel):
+    tasks: list[dict[str, Any]]
+    format: str = "mermaid"
+    execution_results: Optional[dict[str, Any]] = None
+
+
+class WorkflowRetryRunRequest(BaseModel):
+    workflow_name: str
+    payload: Optional[dict[str, Any]] = None
+    max_retries: int = 2
+    base_delay_ms: float = 5.0
+    backoff_factor: float = 2.0
+    tasks: Optional[list[dict[str, Any]]] = None
 
 
 class ReportToRootRequest(BaseModel):
@@ -178,6 +195,98 @@ def post_workflow_run(req: WorkflowRunRequest) -> dict[str, Any]:
             initial_context=req.payload,
         )
     raise HTTPException(status_code=400, detail=f"Unsupported workflow: {req.workflow_name}")
+
+
+@app.post("/api/federation/dag/export")
+def post_dag_export(req: DAGExportRequest) -> dict[str, Any]:
+    fmt = req.format.lower().strip()
+    if fmt not in {"mermaid", "dot"}:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported format '{req.format}'. Supported formats: 'mermaid', 'dot'",
+        )
+
+    try:
+        tasks = [
+            WorkflowTask(
+                task_id=t["task_id"],
+                station_id=t.get("station_id", "station"),
+                action=t.get("action", "action"),
+                payload=t.get("payload", {}),
+                depends_on=t.get("depends_on", []),
+            )
+            for t in req.tasks
+        ]
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid task specification: {exc}")
+
+    try:
+        if fmt == "mermaid":
+            content = export_dag_mermaid(tasks, req.execution_results)
+        else:
+            content = export_dag_dot(tasks, req.execution_results)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        "ok": True,
+        "format": fmt,
+        "content": content,
+    }
+
+
+@app.post("/api/federation/workflow/retry-run")
+def post_workflow_retry_run(req: WorkflowRetryRunRequest) -> dict[str, Any]:
+    if req.tasks is not None:
+        try:
+            tasks = [
+                WorkflowTask(
+                    task_id=t["task_id"],
+                    station_id=t.get("station_id", "station"),
+                    action=t.get("action", "action"),
+                    payload=t.get("payload", {}),
+                    depends_on=t.get("depends_on", []),
+                )
+                for t in req.tasks
+            ]
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid task specification: {exc}")
+    elif req.workflow_name == "security_reversing_audit":
+        t1 = WorkflowTask(
+            task_id="step_audit",
+            station_id="secret_shield",
+            action="audit_secrets",
+            payload=req.payload or {"scope": "input"},
+        )
+        t2 = WorkflowTask(
+            task_id="step_triage",
+            station_id="pe_reversing",
+            action="triage_binary",
+            payload=req.payload or {"sample": "sample.exe"},
+            depends_on=["step_audit"],
+        )
+        t3 = WorkflowTask(
+            task_id="step_seal",
+            station_id="mission_control",
+            action="seal_evidence",
+            payload={"level": "L5"},
+            depends_on=["step_triage"],
+        )
+        tasks = [t1, t2, t3]
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported workflow: {req.workflow_name}")
+
+    try:
+        return _orchestrator.execute_workflow_with_retry(
+            workflow_name=req.workflow_name,
+            tasks=tasks,
+            initial_context=req.payload,
+            max_retries=req.max_retries,
+            base_delay_ms=req.base_delay_ms,
+            backoff_factor=req.backoff_factor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/api/federation/report-to-root")

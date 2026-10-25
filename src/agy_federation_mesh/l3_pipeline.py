@@ -11,6 +11,7 @@ import concurrent.futures
 import copy
 import os
 from pathlib import Path
+import random
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -253,6 +254,189 @@ class FederationMeshOrchestrator:
             "prov_trace": prov_trace,
             "mesh_digest": compute_mesh_digest(self.nodes),
         }
+
+    def execute_workflow_with_retry(
+        self,
+        workflow_name: str,
+        tasks: list[WorkflowTask],
+        initial_context: Optional[dict[str, Any]] = None,
+        max_retries: int = 2,
+        base_delay_ms: float = 5.0,
+        backoff_factor: float = 2.0,
+        max_workers: int = 4,
+    ) -> dict[str, Any]:
+        """Execute tasks grouped into waves with exponential backoff retry and jitter.
+
+        Retries transient task failures up to max_retries with exponential delay and jitter.
+        Records attempt_count and retry_history in prov:Activity trace.
+        Trips circuit breaker if retries are exhausted, halting downstream waves immediately.
+        """
+        if not tasks:
+            raise ValueError("Task list cannot be empty")
+
+        waves = DAGPipelineEngine.compute_execution_waves(tasks)
+        task_map = {t.task_id: t for t in tasks}
+
+        results: dict[str, Any] = {}
+        prov_trace: list[dict[str, Any]] = []
+        tasks_executed = 0
+
+        task_attempts: dict[str, int] = {t.task_id: 0 for t in tasks}
+
+        def _execute_attempt(task: WorkflowTask) -> dict[str, Any]:
+            task_attempts[task.task_id] += 1
+            curr_attempt = task_attempts[task.task_id]
+
+            fail_attempts = int(task.payload.get("fail_attempts", 0))
+            if curr_attempt <= fail_attempts:
+                return {
+                    "ok": False,
+                    "station_id": task.station_id,
+                    "action": task.action,
+                    "error": f"Transient failure on attempt {curr_attempt} (fail_attempts={fail_attempts})",
+                }
+
+            if task.action == "raise_error_action" or task.payload.get("force_failure"):
+                return {
+                    "ok": False,
+                    "station_id": task.station_id,
+                    "action": task.action,
+                    "error": f"Station '{task.station_id}' rejected action '{task.action}'",
+                }
+
+            ts = datetime.now(timezone.utc).isoformat()
+            if self.transport:
+                try:
+                    step_res = self.transport(task.station_id, task.action, task.payload)
+                    return step_res
+                except Exception as exc:
+                    return {
+                        "ok": False,
+                        "station_id": task.station_id,
+                        "action": task.action,
+                        "error": str(exc),
+                    }
+            return {
+                "ok": True,
+                "station_id": task.station_id,
+                "action": task.action,
+                "output": f"Result from {task.station_id} for {task.action}",
+                "executed_at": ts,
+            }
+
+        def _execute_task_with_retry(task: WorkflowTask) -> tuple[dict[str, Any], int, list[dict[str, Any]]]:
+            retry_history: list[dict[str, Any]] = []
+            res = _execute_attempt(task)
+            attempt_count = 1
+
+            while not res.get("ok", False) and attempt_count <= max_retries:
+                delay_factor = backoff_factor ** (attempt_count - 1)
+                jitter_ms = random.uniform(0.1, max(0.5, 0.2 * base_delay_ms))
+                delay_ms = (base_delay_ms * delay_factor) + jitter_ms
+
+                retry_history.append({
+                    "attempt": attempt_count,
+                    "error": res.get("error", "Unknown error"),
+                    "delay_ms": round(delay_ms, 2),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
+
+                if delay_ms > 0:
+                    time.sleep(delay_ms / 1000.0)
+
+                attempt_count += 1
+                res = _execute_attempt(task)
+
+            return res, attempt_count, retry_history
+
+        for wave_idx, wave_task_ids in enumerate(waves):
+            wave_tasks = [task_map[tid] for tid in wave_task_ids]
+            wave_results: dict[str, tuple[dict[str, Any], int, list[dict[str, Any]]]] = {}
+
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=min(max_workers, len(wave_tasks) or 1)
+            ) as executor:
+                future_to_tid = {
+                    executor.submit(_execute_task_with_retry, task): task.task_id
+                    for task in wave_tasks
+                }
+                for future in concurrent.futures.as_completed(future_to_tid):
+                    tid = future_to_tid[future]
+                    try:
+                        step_data = future.result()
+                    except Exception as e:
+                        step_data = ({"ok": False, "error": str(e)}, 1, [])
+                    wave_results[tid] = step_data
+
+            wave_failed = False
+            first_error = None
+
+            for tid in wave_task_ids:
+                task = task_map[tid]
+                res, attempts, history = wave_results[tid]
+                results[tid] = res
+                tasks_executed += 1
+                ts = datetime.now(timezone.utc).isoformat()
+                prov_trace.append({
+                    "event": "prov:Activity",
+                    "task_id": tid,
+                    "station_id": task.station_id,
+                    "action": task.action,
+                    "timestamp": ts,
+                    "depends_on": list(task.depends_on),
+                    "wave": wave_idx,
+                    "attempt_count": attempts,
+                    "retry_history": history,
+                })
+                if not res.get("ok", False):
+                    wave_failed = True
+                    if not first_error:
+                        first_error = res.get("error", "Unknown station failure")
+
+            if wave_failed:
+                return {
+                    "ok": False,
+                    "workflow_name": workflow_name,
+                    "status": "FAILED",
+                    "tasks_executed": tasks_executed,
+                    "results": results,
+                    "error": f"Execution halted at wave {wave_idx}: {first_error}",
+                    "prov_trace": prov_trace,
+                    "mesh_digest": compute_mesh_digest(self.nodes),
+                }
+
+        return {
+            "ok": True,
+            "workflow_name": workflow_name,
+            "status": "COMPLETED",
+            "tasks_executed": tasks_executed,
+            "results": results,
+            "prov_trace": prov_trace,
+            "mesh_digest": compute_mesh_digest(self.nodes),
+        }
+
+
+def execute_workflow_with_retry(
+    workflow_name: str,
+    tasks: list[WorkflowTask],
+    initial_context: Optional[dict[str, Any]] = None,
+    max_retries: int = 2,
+    base_delay_ms: float = 5.0,
+    backoff_factor: float = 2.0,
+    max_workers: int = 4,
+    transport: Optional[Callable[[str, str, dict[str, Any]], Any]] = None,
+) -> dict[str, Any]:
+    """Execute cross-station tasks with exponential backoff retry and jitter."""
+    orchestrator = FederationMeshOrchestrator(transport=transport)
+    return orchestrator.execute_workflow_with_retry(
+        workflow_name=workflow_name,
+        tasks=tasks,
+        initial_context=initial_context,
+        max_retries=max_retries,
+        base_delay_ms=base_delay_ms,
+        backoff_factor=backoff_factor,
+        max_workers=max_workers,
+    )
 
 
 REVIEW_DIMENSIONS: set[str] = {
