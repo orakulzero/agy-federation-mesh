@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agy-federation-mesh"
-version = "1.2.0"
+version = "1.3.0"
+# baseline: version = "1.2.0"
 description = "Tier L5 Cross-Station Swarm Orchestrator & DAG Execution Mesh"
 readme = "README.md"
 requires-python = ">=3.10"
