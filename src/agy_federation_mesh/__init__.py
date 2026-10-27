@@ -16,6 +16,8 @@ from .engine import (
     SwarmWorkerProfile,
     SpeculativeSwarmRouter,
     compute_pareto_optimal_workers,
+    ByzantineQuorumVerifier,
+    WorkStealingDAGScheduler,
 )
 
 __all__ = [
@@ -33,12 +35,8 @@ __all__ = [
     "SwarmWorkerProfile",
     "SpeculativeSwarmRouter",
     "compute_pareto_optimal_workers",
+    "ByzantineQuorumVerifier",
+    "WorkStealingDAGScheduler",
 ]
 
-class _Version(str):
-    def __eq__(self, other):
-        if str(other) in ("1.2.0", "1.3.0"):
-            return True
-        return super().__eq__(other)
-
-__version__ = _Version("1.3.0")
+__version__ = "2.0.0"

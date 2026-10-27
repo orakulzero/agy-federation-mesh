@@ -10,8 +10,11 @@ Tier L5 Multi-Objective Pareto-Front Swarm Router & Speculative Dual-Execution H
 
 from __future__ import annotations
 
+import collections
 import concurrent.futures
 from dataclasses import dataclass, field
+import hashlib
+import json
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
@@ -540,3 +543,365 @@ def compute_pareto_optimal_workers(
         return router.compute_pareto_frontier(task_requirements=task_requirements)
     finally:
         router.close()
+
+
+# ============================================================================
+# 3. Byzantine Quorum Consensus Verifier (REQ-FM-201)
+# ============================================================================
+
+class ByzantineConsensusResult(dict):
+    """Result container for Byzantine quorum consensus verification."""
+
+    def __init__(
+        self,
+        consensus_reached: bool,
+        consensus_output: Any,
+        consensus_hash: str,
+        agreeing_workers: List[str],
+        faulty_workers: List[str],
+        status: str,
+    ) -> None:
+        super().__init__(
+            consensus_reached=consensus_reached,
+            consensus_output=consensus_output,
+            consensus_hash=consensus_hash,
+            agreeing_workers=agreeing_workers,
+            faulty_workers=faulty_workers,
+            status=status,
+        )
+        self.consensus_reached = consensus_reached
+        self.consensus_output = consensus_output
+        self.consensus_hash = consensus_hash
+        self.agreeing_workers = agreeing_workers
+        self.faulty_workers = faulty_workers
+        self.status = status
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"'ByzantineConsensusResult' object has no attribute '{name}'")
+
+
+class ByzantineQuorumVerifier:
+    """Verifies Byzantine fault tolerance consensus across worker nodes with parameter f."""
+
+    def __init__(self, f: int = 1) -> None:
+        self.f = int(f)
+        if self.f < 0:
+            raise ValueError("Fault tolerance parameter f must be non-negative")
+
+    @property
+    def quorum_threshold(self) -> int:
+        return 2 * self.f + 1
+
+    def compute_hash(self, payload: Any) -> str:
+        """Compute canonical JSON SHA-256 hash of a payload."""
+        canonical_str = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
+
+    def verify_consensus(self, worker_outputs: Dict[str, Any]) -> ByzantineConsensusResult:
+        """Verify consensus across worker outputs. Quorum requires >= 2f + 1 votes."""
+        if not worker_outputs:
+            return ByzantineConsensusResult(
+                consensus_reached=False,
+                consensus_output=None,
+                consensus_hash="",
+                agreeing_workers=[],
+                faulty_workers=[],
+                status="BYZANTINE_SPLIT_BRAIN: empty worker outputs",
+            )
+
+        worker_hashes: Dict[str, str] = {}
+        hash_to_payload: Dict[str, Any] = {}
+        tally: Dict[str, List[str]] = {}
+
+        for wid, payload in worker_outputs.items():
+            h = self.compute_hash(payload)
+            worker_hashes[wid] = h
+            if h not in hash_to_payload:
+                hash_to_payload[h] = payload
+            tally.setdefault(h, []).append(wid)
+
+        if len(worker_outputs) < self.quorum_threshold:
+            return ByzantineConsensusResult(
+                consensus_reached=False,
+                consensus_output=None,
+                consensus_hash="",
+                agreeing_workers=[],
+                faulty_workers=list(worker_outputs.keys()),
+                status=f"BYZANTINE_SPLIT_BRAIN: insufficient workers ({len(worker_outputs)} < {self.quorum_threshold})",
+            )
+
+        sorted_tallies = sorted(tally.items(), key=lambda item: len(item[1]), reverse=True)
+        max_votes = len(sorted_tallies[0][1])
+
+        if max_votes < self.quorum_threshold:
+            return ByzantineConsensusResult(
+                consensus_reached=False,
+                consensus_output=None,
+                consensus_hash="",
+                agreeing_workers=[],
+                faulty_workers=sorted(worker_outputs.keys()),
+                status=f"BYZANTINE_SPLIT_BRAIN: max tally ({max_votes}) < quorum ({self.quorum_threshold})",
+            )
+
+        # Check for multiple candidate outputs tying for the maximum vote tally
+        if len(sorted_tallies) > 1 and len(sorted_tallies[0][1]) == len(sorted_tallies[1][1]):
+            return ByzantineConsensusResult(
+                consensus_reached=False,
+                consensus_output=None,
+                consensus_hash="",
+                agreeing_workers=[],
+                faulty_workers=sorted(worker_outputs.keys()),
+                status=f"BYZANTINE_SPLIT_BRAIN: tie detected between candidate outputs ({len(sorted_tallies[0][1])} vs {len(sorted_tallies[1][1])})",
+            )
+
+        # Check if multiple candidates meet quorum (>= 2f + 1) without a strict majority
+        quorum_candidates = [item for item in sorted_tallies if len(item[1]) >= self.quorum_threshold]
+        if len(quorum_candidates) > 1:
+            total_quorum_votes = sum(len(item[1]) for item in quorum_candidates)
+            if max_votes <= total_quorum_votes / 2:
+                return ByzantineConsensusResult(
+                    consensus_reached=False,
+                    consensus_output=None,
+                    consensus_hash="",
+                    agreeing_workers=[],
+                    faulty_workers=sorted(worker_outputs.keys()),
+                    status=f"BYZANTINE_SPLIT_BRAIN: no single candidate has strict majority among candidates >= 2f + 1 ({max_votes}/{total_quorum_votes})",
+                )
+
+        winning_hash, voters = sorted_tallies[0]
+        agreeing = sorted(voters)
+        faulty = sorted([wid for wid in worker_outputs if wid not in agreeing])
+        return ByzantineConsensusResult(
+            consensus_reached=True,
+            consensus_output=hash_to_payload[winning_hash],
+            consensus_hash=winning_hash,
+            agreeing_workers=agreeing,
+            faulty_workers=faulty,
+            status="CONSENSUS_REACHED",
+        )
+
+    verify = verify_consensus
+
+
+# ============================================================================
+# 4. Chase-Lev Deque & Work-Stealing DAG Scheduler (REQ-FM-201)
+# ============================================================================
+
+class ChaseLevDeque:
+    """Worker-local deque implementing Chase-Lev owner-LIFO / thief-FIFO semantics."""
+
+    def __init__(self, worker_id: int) -> None:
+        self.worker_id = worker_id
+        self._items: collections.deque = collections.deque()
+        self._lock = threading.Lock()
+
+    def push(self, item: Any) -> None:
+        """Owner pushes task to bottom (tail)."""
+        with self._lock:
+            self._items.append(item)
+
+    def pop(self) -> Optional[Any]:
+        """Owner pops task from bottom (tail) - LIFO."""
+        with self._lock:
+            if not self._items:
+                return None
+            return self._items.pop()
+
+    def steal(self) -> Optional[Any]:
+        """Thief steals task from top (head) - FIFO."""
+        with self._lock:
+            if not self._items:
+                return None
+            return self._items.popleft()
+
+    def popleft(self) -> Optional[Any]:
+        """Alias for steal."""
+        return self.steal()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._items)
+
+
+class WorkStealingDAGScheduler:
+    """Chase-Lev work-stealing DAG scheduler with multi-worker parallelism and cycle detection."""
+
+    def __init__(self, num_workers: int = 4) -> None:
+        self.num_workers = max(1, int(num_workers))
+        self.deques: List[ChaseLevDeque] = [ChaseLevDeque(i) for i in range(self.num_workers)]
+        self.workers: List[str] = [f"worker_{i}" for i in range(self.num_workers)]
+        self.steal_count: int = 0
+        self._tasks: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
+
+    def add_task(
+        self,
+        task_id: str,
+        fn: Callable[[], Any],
+        depends_on: Optional[List[str]] = None,
+    ) -> None:
+        """Add a single task node with optional upstream dependencies to the DAG."""
+        deps = list(depends_on) if depends_on else []
+        self._tasks[task_id] = {
+            "task_id": task_id,
+            "fn": fn,
+            "depends_on": deps,
+        }
+
+    def schedule(self, tasks: List[Dict[str, Any]]) -> None:
+        """Batch schedule a list of task specification dictionaries."""
+        for t in tasks:
+            self.add_task(
+                task_id=t["task_id"],
+                fn=t["fn"],
+                depends_on=t.get("depends_on", []),
+            )
+
+    def validate_dag(self) -> None:
+        """Validate DAG: verify all dependencies exist and detect cyclic deadlocks."""
+        # Check unknown dependencies
+        for task_id, task in self._tasks.items():
+            for dep in task["depends_on"]:
+                if dep not in self._tasks:
+                    raise ValueError(
+                        f"Unknown dependency: '{dep}' referenced by task '{task_id}'"
+                    )
+
+        # Kahn's algorithm cycle detection
+        in_degrees = {t: len(task["depends_on"]) for t, task in self._tasks.items()}
+        children: Dict[str, List[str]] = {t: [] for t in self._tasks}
+        for t, task in self._tasks.items():
+            for dep in task["depends_on"]:
+                children[dep].append(t)
+
+        zero_queue = collections.deque([t for t, deg in in_degrees.items() if deg == 0])
+        visited = 0
+        while zero_queue:
+            curr = zero_queue.popleft()
+            visited += 1
+            for child in children[curr]:
+                in_degrees[child] -= 1
+                if in_degrees[child] == 0:
+                    zero_queue.append(child)
+
+        if visited != len(self._tasks):
+            raise ValueError(
+                f"Cyclic dependency detected: cycle exists in DAG with {len(self._tasks)} tasks"
+            )
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Return runtime statistics for work-stealing execution."""
+        with self._lock:
+            return {
+                "num_workers": self.num_workers,
+                "steal_count": self.steal_count,
+                "total_tasks": len(self._tasks),
+            }
+
+    def run(self) -> Dict[str, Any]:
+        """Execute the DAG tasks in parallel using Chase-Lev work-stealing workers."""
+        self.validate_dag()
+
+        if not self._tasks:
+            return {}
+
+        # Reset deques and counters
+        with self._lock:
+            self.steal_count = 0
+            for d in self.deques:
+                with d._lock:
+                    d._items.clear()
+
+        in_degrees = {t: len(self._tasks[t]["depends_on"]) for t in self._tasks}
+        children: Dict[str, List[str]] = {t: [] for t in self._tasks}
+        for t, task in self._tasks.items():
+            for dep in task["depends_on"]:
+                children[dep].append(t)
+
+        results: Dict[str, Any] = {}
+        errors: List[Exception] = []
+        completed_count = 0
+        total_tasks = len(self._tasks)
+
+        lock = threading.Lock()
+        cv = threading.Condition(lock)
+        stop_event = threading.Event()
+
+        # Enqueue initial ready tasks (in_degree == 0)
+        ready_tasks = [t for t, deg in in_degrees.items() if deg == 0]
+        for task_id in ready_tasks:
+            self.deques[0].push(task_id)
+
+        def _worker_loop(w_idx: int) -> None:
+            nonlocal completed_count
+            while not stop_event.is_set():
+                task_id = self.deques[w_idx].pop()
+                if task_id is None:
+                    # Steal from peer workers
+                    stolen_task = None
+                    for victim_offset in range(1, self.num_workers):
+                        victim_idx = (w_idx + victim_offset) % self.num_workers
+                        stolen = self.deques[victim_idx].steal()
+                        if stolen is not None:
+                            stolen_task = stolen
+                            with self._lock:
+                                self.steal_count += 1
+                            break
+
+                    if stolen_task is not None:
+                        task_id = stolen_task
+                    else:
+                        with cv:
+                            if completed_count >= total_tasks or errors or stop_event.is_set():
+                                break
+                            cv.wait(timeout=0.002)
+                        continue
+
+                # Execute task
+                task_info = self._tasks[task_id]
+                fn = task_info["fn"]
+                try:
+                    res = fn()
+                except Exception as exc:
+                    with cv:
+                        errors.append(exc)
+                        stop_event.set()
+                        cv.notify_all()
+                    break
+
+                with cv:
+                    results[task_id] = res
+                    completed_count += 1
+                    for child in children[task_id]:
+                        in_degrees[child] -= 1
+                        if in_degrees[child] == 0:
+                            self.deques[w_idx].push(child)
+                    cv.notify_all()
+                    if completed_count >= total_tasks:
+                        stop_event.set()
+                        cv.notify_all()
+                        break
+
+        threads: List[threading.Thread] = []
+        for i in range(self.num_workers):
+            t = threading.Thread(
+                target=_worker_loop,
+                args=(i,),
+                name=f"dag_worker_{i}",
+                daemon=True,
+            )
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        if errors:
+            raise errors[0]
+
+        return results
+
+    execute = run
