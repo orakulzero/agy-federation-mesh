@@ -2,7 +2,12 @@
   "mcpServers": {
     "agy-federation-mesh-router": {
       "command": "python",
-      "args": ["-m", "agy_federation_mesh.cli", "topology", "--json"],
+      "args": [
+        "-W",
+        "ignore::RuntimeWarning",
+        "-m",
+        "agy_federation_mesh.mcp_server"
+      ],
       "timeout_ms": 15000,
       "tools": [
         "discover_topology",
