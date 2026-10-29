@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Any
 
 from .l1_primitives import (
     STATION_CATALOG,
@@ -14,6 +14,30 @@ from .l1_primitives import (
     compute_mesh_digest,
 )
 from .l3_pipeline import FederationMeshOrchestrator
+
+
+def validate_cli_args(args: dict[str, Any]) -> dict[str, Any]:
+    """
+    Validate command line arguments.
+    
+    Expected keys:
+    - command: string
+    - json: boolean
+    - workflow: string (required for run command)
+    """
+    result = {"valid": True, "command": args.get("command"), "errors": []}
+    
+    cmd = args.get("command")
+    if cmd not in ["topology", "run"]:
+        result["valid"] = False
+        result["errors"].append(f"Unknown command: {cmd}")
+        return result
+        
+    if cmd == "run" and "workflow" not in args:
+        result["valid"] = False
+        result["errors"].append("Missing required parameter: workflow")
+        
+    return result
 
 
 def build_parser() -> argparse.ArgumentParser:
