@@ -16,6 +16,15 @@ from .l1_primitives import (
 from .l3_pipeline import FederationMeshOrchestrator
 
 
+def format_cli_diagnostic(args: dict[str, Any]) -> dict[str, Any]:
+    """Format CLI diagnostics."""
+    return {
+        "arg_count": len(args),
+        "command_type": args.get("command"),
+        "has_json_flag": bool(args.get("json", False))
+    }
+
+
 def validate_cli_args(args: dict[str, Any]) -> dict[str, Any]:
     """
     Validate command line arguments.
