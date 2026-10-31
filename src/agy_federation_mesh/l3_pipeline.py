@@ -9,11 +9,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import concurrent.futures
 import copy
-import os
 from pathlib import Path
 import random
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
+from collections.abc import Callable
 
 from .l1_primitives import (
     DAGPipelineEngine,
@@ -29,8 +29,8 @@ class FederationMeshOrchestrator:
 
     def __init__(
         self,
-        nodes: Optional[list[StationNode]] = None,
-        transport: Optional[Callable[[str, str, dict[str, Any]], Any]] = None,
+        nodes: list[StationNode] | None = None,
+        transport: Callable[[str, str, dict[str, Any]], Any] | None = None,
     ) -> None:
         if nodes is not None:
             self.nodes = list(nodes)
@@ -65,7 +65,7 @@ class FederationMeshOrchestrator:
         self,
         workflow_name: str,
         tasks: list[WorkflowTask],
-        initial_context: Optional[dict[str, Any]] = None,
+        initial_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute cross-station tasks in topological DAG order.
 
@@ -79,7 +79,7 @@ class FederationMeshOrchestrator:
 
         results: dict[str, Any] = {}
         prov_trace: list[dict[str, Any]] = []
-        context: dict[str, Any] = dict(initial_context or {})
+        dict(initial_context or {})
         tasks_executed = 0
 
         for task_id in execution_order:
@@ -143,7 +143,7 @@ class FederationMeshOrchestrator:
         self,
         workflow_name: str,
         tasks: list[WorkflowTask],
-        initial_context: Optional[dict[str, Any]] = None,
+        initial_context: dict[str, Any] | None = None,
         max_workers: int = 4,
     ) -> dict[str, Any]:
         """Execute cross-station tasks grouped into topological waves concurrently.
@@ -172,8 +172,7 @@ class FederationMeshOrchestrator:
             ts = datetime.now(timezone.utc).isoformat()
             if self.transport:
                 try:
-                    step_res = self.transport(task.station_id, task.action, task.payload)
-                    return step_res
+                    return self.transport(task.station_id, task.action, task.payload)
                 except Exception as exc:
                     return {
                         "ok": False,
@@ -259,7 +258,7 @@ class FederationMeshOrchestrator:
         self,
         workflow_name: str,
         tasks: list[WorkflowTask],
-        initial_context: Optional[dict[str, Any]] = None,
+        initial_context: dict[str, Any] | None = None,
         max_retries: int = 2,
         base_delay_ms: float = 5.0,
         backoff_factor: float = 2.0,
@@ -307,8 +306,7 @@ class FederationMeshOrchestrator:
             ts = datetime.now(timezone.utc).isoformat()
             if self.transport:
                 try:
-                    step_res = self.transport(task.station_id, task.action, task.payload)
-                    return step_res
+                    return self.transport(task.station_id, task.action, task.payload)
                 except Exception as exc:
                     return {
                         "ok": False,
@@ -419,12 +417,12 @@ class FederationMeshOrchestrator:
 def execute_workflow_with_retry(
     workflow_name: str,
     tasks: list[WorkflowTask],
-    initial_context: Optional[dict[str, Any]] = None,
+    initial_context: dict[str, Any] | None = None,
     max_retries: int = 2,
     base_delay_ms: float = 5.0,
     backoff_factor: float = 2.0,
     max_workers: int = 4,
-    transport: Optional[Callable[[str, str, dict[str, Any]], Any]] = None,
+    transport: Callable[[str, str, dict[str, Any]], Any] | None = None,
 ) -> dict[str, Any]:
     """Execute cross-station tasks with exponential backoff retry and jitter."""
     orchestrator = FederationMeshOrchestrator(transport=transport)
@@ -485,11 +483,11 @@ def drop_revealing_asks(tour_data: dict[str, Any]) -> dict[str, Any]:
 
 def synthesize_diff_tour_dossier(
     repo_path: str,
-    secret_shield_result: Optional[dict[str, Any]] = None,
-    pe_reversing_result: Optional[dict[str, Any]] = None,
-    eskd_vision_result: Optional[dict[str, Any]] = None,
-    mesh_telemetry: Optional[dict[str, Any]] = None,
-    title: Optional[str] = None,
+    secret_shield_result: dict[str, Any] | None = None,
+    pe_reversing_result: dict[str, Any] | None = None,
+    eskd_vision_result: dict[str, Any] | None = None,
+    mesh_telemetry: dict[str, Any] | None = None,
+    title: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize a cross-station diff-tour v1 dossier validated for native tour.exe.
 
