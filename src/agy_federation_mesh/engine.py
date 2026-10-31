@@ -17,7 +17,8 @@ import hashlib
 import json
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any
+from collections.abc import Callable, Sequence
 
 
 # ============================================================================
@@ -30,7 +31,7 @@ class SwarmWorkerProfile:
 
     id: str
     name: str = ""
-    capabilities: List[str] = field(default_factory=list)
+    capabilities: list[str] = field(default_factory=list)
     latency_p50_ms: float = 20.0
     latency_p95_ms: float = 100.0
     latency_ema_ms: float = 25.0
@@ -71,7 +72,7 @@ class SwarmWorkerProfile:
     def inflight_count(self, value: int) -> None:
         self.current_inflight = int(value)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize worker profile to dictionary."""
         return {
             "id": self.id,
@@ -95,7 +96,7 @@ class SwarmWorkerProfile:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "SwarmWorkerProfile":
+    def from_dict(cls, data: dict[str, Any]) -> SwarmWorkerProfile:
         """Instantiate profile from dictionary with alias handling."""
         worker_id = data.get("id") or data.get("worker_id") or "worker_unknown"
         name = data.get("name") or worker_id
@@ -131,11 +132,11 @@ class SpeculativeSwarmRouter:
 
     def __init__(
         self,
-        workers: Optional[Sequence[Union[Dict[str, Any], SwarmWorkerProfile]]] = None,
+        workers: Sequence[dict[str, Any] | SwarmWorkerProfile] | None = None,
         hedging_delay_ms: float = 50.0,
     ) -> None:
         self.hedging_delay_ms = float(hedging_delay_ms)
-        self.workers: Dict[str, SwarmWorkerProfile] = {}
+        self.workers: dict[str, SwarmWorkerProfile] = {}
         self._lock = threading.Lock()
         self._executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=32,
@@ -145,7 +146,7 @@ class SpeculativeSwarmRouter:
             for w in workers:
                 self.register_worker(w)
 
-    def register_worker(self, worker: Union[Dict[str, Any], SwarmWorkerProfile]) -> None:
+    def register_worker(self, worker: dict[str, Any] | SwarmWorkerProfile) -> None:
         """Register or update a worker node in the swarm registry."""
         if isinstance(worker, dict):
             profile = SwarmWorkerProfile.from_dict(worker)
@@ -157,21 +158,21 @@ class SpeculativeSwarmRouter:
         with self._lock:
             self.workers[profile.id] = profile
 
-    def get_worker(self, worker_id: str) -> Optional[SwarmWorkerProfile]:
+    def get_worker(self, worker_id: str) -> SwarmWorkerProfile | None:
         """Retrieve worker profile by ID."""
         with self._lock:
             return self.workers.get(worker_id)
 
-    def list_workers(self) -> List[SwarmWorkerProfile]:
+    def list_workers(self) -> list[SwarmWorkerProfile]:
         """Return list of all registered worker profiles."""
         with self._lock:
             return list(self.workers.values())
 
     def compute_pareto_frontier(
         self,
-        candidates: Optional[Sequence[Union[Dict[str, Any], SwarmWorkerProfile]]] = None,
-        task_requirements: Optional[Dict[str, Any]] = None,
-    ) -> List[SwarmWorkerProfile]:
+        candidates: Sequence[dict[str, Any] | SwarmWorkerProfile] | None = None,
+        task_requirements: dict[str, Any] | None = None,
+    ) -> list[SwarmWorkerProfile]:
         """Filter candidate workers and compute non-dominated Pareto frontier.
 
         Dominance criteria:
@@ -230,7 +231,7 @@ class SpeculativeSwarmRouter:
             return []
 
         # 8. Compute Pareto Frontier with in-flight load penalty
-        frontier: List[SwarmWorkerProfile] = []
+        frontier: list[SwarmWorkerProfile] = []
         for cand in active:
             cand_l = cand.latency_p50_ms * (1.0 + 0.2 * max(0, cand.current_inflight))
             cand_c = cand.cost_per_1k_tokens
@@ -254,7 +255,7 @@ class SpeculativeSwarmRouter:
 
         return frontier
 
-    def select_pareto_worker(self, task_requirements: Dict[str, Any]) -> str:
+    def select_pareto_worker(self, task_requirements: dict[str, Any]) -> str:
         """Select optimal worker ID from Pareto frontier based on requirements and weights.
 
         Supports:
@@ -336,13 +337,13 @@ class SpeculativeSwarmRouter:
     def execute_with_hedging(
         self,
         task_id: str,
-        primary_fn: Optional[Callable[[], Any]] = None,
-        fallback_fn: Optional[Callable[[], Any]] = None,
-        hedging_delay_ms: Optional[float] = None,
+        primary_fn: Callable[[], Any] | None = None,
+        fallback_fn: Callable[[], Any] | None = None,
+        hedging_delay_ms: float | None = None,
         critical_path: bool = False,
-        task_fn: Optional[Callable[[], Any]] = None,
+        task_fn: Callable[[], Any] | None = None,
         **kwargs: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute task with delayed speculative hedging for critical path nodes.
 
         - If critical_path=False: executes primary_fn directly.
@@ -359,7 +360,7 @@ class SpeculativeSwarmRouter:
 
         t0 = time.perf_counter()
 
-        def _extract_tokens_and_cost(result_val: Any) -> Tuple[int, float]:
+        def _extract_tokens_and_cost(result_val: Any) -> tuple[int, float]:
             if isinstance(result_val, dict):
                 tokens = int(result_val.get("tokens") or result_val.get("estimated_tokens") or 500)
                 cost = float(result_val.get("cost") or result_val.get("token_cost") or 0.001)
@@ -526,7 +527,7 @@ class SpeculativeSwarmRouter:
         """Shutdown internal executor pool."""
         self._executor.shutdown(wait=False, cancel_futures=True)
 
-    def __enter__(self) -> "SpeculativeSwarmRouter":
+    def __enter__(self) -> SpeculativeSwarmRouter:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
@@ -534,9 +535,9 @@ class SpeculativeSwarmRouter:
 
 
 def compute_pareto_optimal_workers(
-    workers: Sequence[Union[Dict[str, Any], SwarmWorkerProfile]],
-    task_requirements: Optional[Dict[str, Any]] = None,
-) -> List[SwarmWorkerProfile]:
+    workers: Sequence[dict[str, Any] | SwarmWorkerProfile],
+    task_requirements: dict[str, Any] | None = None,
+) -> list[SwarmWorkerProfile]:
     """Compute non-dominated Pareto frontier workers from candidates."""
     router = SpeculativeSwarmRouter(workers=workers)
     try:
@@ -557,8 +558,8 @@ class ByzantineConsensusResult(dict):
         consensus_reached: bool,
         consensus_output: Any,
         consensus_hash: str,
-        agreeing_workers: List[str],
-        faulty_workers: List[str],
+        agreeing_workers: list[str],
+        faulty_workers: list[str],
         status: str,
     ) -> None:
         super().__init__(
@@ -600,7 +601,7 @@ class ByzantineQuorumVerifier:
         canonical_str = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
 
-    def verify_consensus(self, worker_outputs: Dict[str, Any]) -> ByzantineConsensusResult:
+    def verify_consensus(self, worker_outputs: dict[str, Any]) -> ByzantineConsensusResult:
         """Verify consensus across worker outputs. Quorum requires >= 2f + 1 votes."""
         if not worker_outputs:
             return ByzantineConsensusResult(
@@ -612,9 +613,9 @@ class ByzantineQuorumVerifier:
                 status="BYZANTINE_SPLIT_BRAIN: empty worker outputs",
             )
 
-        worker_hashes: Dict[str, str] = {}
-        hash_to_payload: Dict[str, Any] = {}
-        tally: Dict[str, List[str]] = {}
+        worker_hashes: dict[str, str] = {}
+        hash_to_payload: dict[str, Any] = {}
+        tally: dict[str, list[str]] = {}
 
         for wid, payload in worker_outputs.items():
             h = self.compute_hash(payload)
@@ -703,21 +704,21 @@ class ChaseLevDeque:
         with self._lock:
             self._items.append(item)
 
-    def pop(self) -> Optional[Any]:
+    def pop(self) -> Any | None:
         """Owner pops task from bottom (tail) - LIFO."""
         with self._lock:
             if not self._items:
                 return None
             return self._items.pop()
 
-    def steal(self) -> Optional[Any]:
+    def steal(self) -> Any | None:
         """Thief steals task from top (head) - FIFO."""
         with self._lock:
             if not self._items:
                 return None
             return self._items.popleft()
 
-    def popleft(self) -> Optional[Any]:
+    def popleft(self) -> Any | None:
         """Alias for steal."""
         return self.steal()
 
@@ -731,17 +732,17 @@ class WorkStealingDAGScheduler:
 
     def __init__(self, num_workers: int = 4) -> None:
         self.num_workers = max(1, int(num_workers))
-        self.deques: List[ChaseLevDeque] = [ChaseLevDeque(i) for i in range(self.num_workers)]
-        self.workers: List[str] = [f"worker_{i}" for i in range(self.num_workers)]
+        self.deques: list[ChaseLevDeque] = [ChaseLevDeque(i) for i in range(self.num_workers)]
+        self.workers: list[str] = [f"worker_{i}" for i in range(self.num_workers)]
         self.steal_count: int = 0
-        self._tasks: Dict[str, Dict[str, Any]] = {}
+        self._tasks: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
     def add_task(
         self,
         task_id: str,
         fn: Callable[[], Any],
-        depends_on: Optional[List[str]] = None,
+        depends_on: list[str] | None = None,
     ) -> None:
         """Add a single task node with optional upstream dependencies to the DAG."""
         deps = list(depends_on) if depends_on else []
@@ -751,7 +752,7 @@ class WorkStealingDAGScheduler:
             "depends_on": deps,
         }
 
-    def schedule(self, tasks: List[Dict[str, Any]]) -> None:
+    def schedule(self, tasks: list[dict[str, Any]]) -> None:
         """Batch schedule a list of task specification dictionaries."""
         for t in tasks:
             self.add_task(
@@ -772,7 +773,7 @@ class WorkStealingDAGScheduler:
 
         # Kahn's algorithm cycle detection
         in_degrees = {t: len(task["depends_on"]) for t, task in self._tasks.items()}
-        children: Dict[str, List[str]] = {t: [] for t in self._tasks}
+        children: dict[str, list[str]] = {t: [] for t in self._tasks}
         for t, task in self._tasks.items():
             for dep in task["depends_on"]:
                 children[dep].append(t)
@@ -792,7 +793,7 @@ class WorkStealingDAGScheduler:
                 f"Cyclic dependency detected: cycle exists in DAG with {len(self._tasks)} tasks"
             )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Return runtime statistics for work-stealing execution."""
         with self._lock:
             return {
@@ -801,7 +802,7 @@ class WorkStealingDAGScheduler:
                 "total_tasks": len(self._tasks),
             }
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """Execute the DAG tasks in parallel using Chase-Lev work-stealing workers."""
         self.validate_dag()
 
@@ -816,13 +817,13 @@ class WorkStealingDAGScheduler:
                     d._items.clear()
 
         in_degrees = {t: len(self._tasks[t]["depends_on"]) for t in self._tasks}
-        children: Dict[str, List[str]] = {t: [] for t in self._tasks}
+        children: dict[str, list[str]] = {t: [] for t in self._tasks}
         for t, task in self._tasks.items():
             for dep in task["depends_on"]:
                 children[dep].append(t)
 
-        results: Dict[str, Any] = {}
-        errors: List[Exception] = []
+        results: dict[str, Any] = {}
+        errors: list[Exception] = []
         completed_count = 0
         total_tasks = len(self._tasks)
 
@@ -885,7 +886,7 @@ class WorkStealingDAGScheduler:
                         cv.notify_all()
                         break
 
-        threads: List[threading.Thread] = []
+        threads: list[threading.Thread] = []
         for i in range(self.num_workers):
             t = threading.Thread(
                 target=_worker_loop,
