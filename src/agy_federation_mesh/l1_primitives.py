@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 STATION_CATALOG: dict[str, dict[str, Any]] = {
     "mission_control": {
@@ -201,7 +201,7 @@ class StationReplica:
 class StationLoadBalancer:
     """Adaptive load balancer with latency EMA, inflight tracking, and health failover."""
 
-    def __init__(self, replicas: Optional[list[StationReplica]] = None) -> None:
+    def __init__(self, replicas: list[StationReplica] | None = None) -> None:
         self.replicas: list[StationReplica] = list(replicas) if replicas else []
 
     def add_replica(self, replica: StationReplica) -> None:
@@ -212,14 +212,14 @@ class StationLoadBalancer:
                 return
         self.replicas.append(replica)
 
-    def get_replicas(self, station_id: Optional[str] = None) -> list[StationReplica]:
+    def get_replicas(self, station_id: str | None = None) -> list[StationReplica]:
         """Return all replicas, optionally filtered by station_id."""
         if station_id is None:
             return list(self.replicas)
         return [r for r in self.replicas if r.station_id == station_id]
 
     def select_replica(
-        self, station_id: str, required_capability: Optional[str] = None
+        self, station_id: str, required_capability: str | None = None
     ) -> StationReplica:
         """Select optimal replica minimizing (latency_ema_ms * (1 + inflight_count)) / weight.
 
@@ -264,7 +264,7 @@ class StationLoadBalancer:
         On success: reset consecutive failures; if DEGRADED, restore to ONLINE.
         On failure: increment consecutive failures; transition to DEGRADED (>=2) or OFFLINE (>=5).
         """
-        target: Optional[StationReplica] = None
+        target: StationReplica | None = None
         for r in self.replicas:
             if r.base_url == base_url:
                 target = r
@@ -283,14 +283,13 @@ class StationLoadBalancer:
             target.consecutive_failures += 1
             if target.consecutive_failures >= 5:
                 target.status = "OFFLINE"
-            elif target.consecutive_failures >= 2:
-                if target.status != "OFFLINE":
-                    target.status = "DEGRADED"
+            elif target.consecutive_failures >= 2 and target.status != "OFFLINE":
+                target.status = "DEGRADED"
 
 
 def export_dag_mermaid(
     tasks: list[WorkflowTask],
-    execution_results: Optional[dict[str, Any]] = None,
+    execution_results: dict[str, Any] | None = None,
 ) -> str:
     """Generate valid Mermaid flowchart TD grouping tasks into wave subgraphs.
 
@@ -326,8 +325,7 @@ def export_dag_mermaid(
 
     edge_pairs: list[tuple[str, str]] = []
     for t in tasks:
-        for dep in t.depends_on:
-            edge_pairs.append((dep, t.task_id))
+        edge_pairs.extend((dep, t.task_id) for dep in t.depends_on)
 
     edge_pairs.sort()
     for dep, tid in edge_pairs:
@@ -338,7 +336,7 @@ def export_dag_mermaid(
 
 def export_dag_dot(
     tasks: list[WorkflowTask],
-    execution_results: Optional[dict[str, Any]] = None,
+    execution_results: dict[str, Any] | None = None,
 ) -> str:
     """Generate valid Graphviz DOT digraph grouping tasks into wave clusters.
 
@@ -381,8 +379,7 @@ def export_dag_dot(
 
     edge_pairs: list[tuple[str, str]] = []
     for t in tasks:
-        for dep in t.depends_on:
-            edge_pairs.append((dep, t.task_id))
+        edge_pairs.extend((dep, t.task_id) for dep in t.depends_on)
 
     edge_pairs.sort()
     for dep, tid in edge_pairs:
@@ -390,4 +387,3 @@ def export_dag_dot(
 
     lines.append("}")
     return "\n".join(lines) + "\n"
-
