@@ -6,20 +6,17 @@ workflow execution, and automated child session telemetry reporting.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from .l1_primitives import (
-    STATION_CATALOG,
-    StationNode,
     WorkflowTask,
-    compute_mesh_digest,
     export_dag_dot,
     export_dag_mermaid,
 )
@@ -43,29 +40,29 @@ _orchestrator = FederationMeshOrchestrator()
 
 class WorkflowRunRequest(BaseModel):
     workflow_name: str
-    payload: Optional[dict[str, Any]] = None
+    payload: dict[str, Any] | None = None
 
 
 class DAGExportRequest(BaseModel):
     tasks: list[dict[str, Any]]
     format: str = "mermaid"
-    execution_results: Optional[dict[str, Any]] = None
+    execution_results: dict[str, Any] | None = None
 
 
 class WorkflowRetryRunRequest(BaseModel):
     workflow_name: str
-    payload: Optional[dict[str, Any]] = None
+    payload: dict[str, Any] | None = None
     max_retries: int = 2
     base_delay_ms: float = 5.0
     backoff_factor: float = 2.0
-    tasks: Optional[list[dict[str, Any]]] = None
+    tasks: list[dict[str, Any]] | None = None
 
 
 class ReportToRootRequest(BaseModel):
     target_dir: str
     summary: str
     status: str = "COMPLETED"
-    metrics: Optional[dict[str, Any]] = None
+    metrics: dict[str, Any] | None = None
 
 
 COCKPIT_HTML = """<!DOCTYPE html>
@@ -218,7 +215,7 @@ def post_dag_export(req: DAGExportRequest) -> dict[str, Any]:
             for t in req.tasks
         ]
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid task specification: {exc}")
+        raise HTTPException(status_code=400, detail=f"Invalid task specification: {exc}") from exc
 
     try:
         if fmt == "mermaid":
@@ -226,7 +223,7 @@ def post_dag_export(req: DAGExportRequest) -> dict[str, Any]:
         else:
             content = export_dag_dot(tasks, req.execution_results)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {
         "ok": True,
@@ -250,7 +247,7 @@ def post_workflow_retry_run(req: WorkflowRetryRunRequest) -> dict[str, Any]:
                 for t in req.tasks
             ]
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid task specification: {exc}")
+            raise HTTPException(status_code=400, detail=f"Invalid task specification: {exc}") from exc
     elif req.workflow_name == "security_reversing_audit":
         t1 = WorkflowTask(
             task_id="step_audit",
@@ -286,7 +283,7 @@ def post_workflow_retry_run(req: WorkflowRetryRunRequest) -> dict[str, Any]:
             backoff_factor=req.backoff_factor,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/federation/report-to-root")
@@ -294,7 +291,7 @@ def post_report_to_root(req: ReportToRootRequest) -> dict[str, Any]:
     target_path = Path(req.target_dir).resolve()
     target_path.mkdir(parents=True, exist_ok=True)
 
-    ts = datetime.now(timezone.utc).isoformat()
+    ts = datetime.now(UTC).isoformat()
     record = {
         "timestamp": ts,
         "project": "agy-federation-mesh",
