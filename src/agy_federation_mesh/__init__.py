@@ -19,6 +19,10 @@ from .engine import (
     ByzantineQuorumVerifier,
     WorkStealingDAGScheduler,
 )
+from .verification_loop import (
+    build_three_wave_verification_dag,
+    execute_autonomous_verification_loop,
+)
 
 __all__ = [
     "DAGPipelineEngine",
@@ -37,6 +41,8 @@ __all__ = [
     "compute_pareto_optimal_workers",
     "ByzantineQuorumVerifier",
     "WorkStealingDAGScheduler",
+    "build_three_wave_verification_dag",
+    "execute_autonomous_verification_loop",
 ]
 
 __version__ = "2.0.0"
