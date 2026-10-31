@@ -5,13 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import Optional, Sequence, Any
+from collections.abc import Sequence
 
 from .l1_primitives import (
-    STATION_CATALOG,
-    StationNode,
     WorkflowTask,
-    compute_mesh_digest,
 )
 from .l3_pipeline import FederationMeshOrchestrator
 
@@ -33,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -61,9 +58,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else:
                 print(f"[AGY-FEDERATION] Workflow: {res['workflow_name']} -> {res['status']}")
             return 0 if res["ok"] else 1
-        else:
-            print(f"Unknown workflow: {args.workflow}", file=sys.stderr)
-            return 1
+        print(f"Unknown workflow: {args.workflow}", file=sys.stderr)
+        return 1
 
     return 1
 
