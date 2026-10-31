@@ -16,39 +16,6 @@ from .l1_primitives import (
 from .l3_pipeline import FederationMeshOrchestrator
 
 
-def format_cli_diagnostic(args: dict[str, Any]) -> dict[str, Any]:
-    """Format CLI diagnostics."""
-    return {
-        "arg_count": len(args),
-        "command_type": args.get("command"),
-        "has_json_flag": bool(args.get("json", False))
-    }
-
-
-def validate_cli_args(args: dict[str, Any]) -> dict[str, Any]:
-    """
-    Validate command line arguments.
-    
-    Expected keys:
-    - command: string
-    - json: boolean
-    - workflow: string (required for run command)
-    """
-    result = {"valid": True, "command": args.get("command"), "errors": []}
-    
-    cmd = args.get("command")
-    if cmd not in ["topology", "run"]:
-        result["valid"] = False
-        result["errors"].append(f"Unknown command: {cmd}")
-        return result
-        
-    if cmd == "run" and "workflow" not in args:
-        result["valid"] = False
-        result["errors"].append("Missing required parameter: workflow")
-        
-    return result
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="agy-federation-mesh",
