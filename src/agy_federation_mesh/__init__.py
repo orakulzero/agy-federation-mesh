@@ -23,14 +23,22 @@ from .verification_loop import (
     build_three_wave_verification_dag,
     execute_autonomous_verification_loop,
 )
+from .webrtc_swarm_federation import (
+    FederatedPeerNode,
+    SubSwarmSession,
+    WebRTCSwarmFederation,
+)
 
 __all__ = [
     "DAGPipelineEngine",
+    "FederatedPeerNode",
     "FederationMeshOrchestrator",
     "STATION_CATALOG",
     "StationLoadBalancer",
     "StationNode",
     "StationReplica",
+    "SubSwarmSession",
+    "WebRTCSwarmFederation",
     "WorkflowTask",
     "compute_mesh_digest",
     "execute_workflow_with_retry",
