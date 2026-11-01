@@ -74,6 +74,15 @@ class FederationMeshOrchestrator:
         if not tasks:
             raise ValueError("Task list cannot be empty")
 
+        # Pre-flight worktree and lock pruner before DAG execution (REQ-FM-WORKTREE-01)
+        target_repo = (initial_context or {}).get("repo_path")
+        if target_repo or Path(".git").is_dir():
+            try:
+                from .worktree_pruner import preflight_dag_dispatch_check
+                preflight_dag_dispatch_check(target_repo)
+            except Exception:
+                pass
+
         execution_order = DAGPipelineEngine.validate_dag(tasks)
         task_map = {t.task_id: t for t in tasks}
 

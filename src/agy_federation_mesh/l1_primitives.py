@@ -62,7 +62,7 @@ class WorkflowTask:
     task_id: str
     station_id: str
     action: str
-    payload: dict[str, Any]
+    payload: dict[str, Any] = field(default_factory=dict)
     depends_on: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
