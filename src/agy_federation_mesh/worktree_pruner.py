@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 def _run_git_cmd(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -30,12 +30,12 @@ def _run_git_cmd(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
 def prune_orphaned_worktrees_and_locks(
     repo_path: Path | str,
     dry_run: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Diagnose and clean dangling worktrees, stale lockfiles, and invalid git configs (REQ-FM-WORKTREE-01)."""
     repo = Path(repo_path).resolve()
     git_dir = repo / ".git"
-    issues: List[str] = []
-    actions_taken: List[str] = []
+    issues: list[str] = []
+    actions_taken: list[str] = []
 
     if not git_dir.is_dir():
         return {
@@ -123,7 +123,7 @@ def prune_orphaned_worktrees_and_locks(
     }
 
 
-def preflight_dag_dispatch_check(repo_path: Path | str | None = None) -> Dict[str, Any]:
+def preflight_dag_dispatch_check(repo_path: Path | str | None = None) -> dict[str, Any]:
     """Pre-flight hook running automated worktree and lock cleanup before DAG node dispatch (REQ-FM-WORKTREE-01)."""
     target = Path(repo_path).resolve() if repo_path else Path.cwd().resolve()
     return prune_orphaned_worktrees_and_locks(target, dry_run=False)
@@ -135,8 +135,8 @@ class WorktreePruner:
     def __init__(self, repo_path: Path | str = ".") -> None:
         self.repo_path = Path(repo_path).resolve()
 
-    def prune(self, dry_run: bool = False) -> Dict[str, Any]:
+    def prune(self, dry_run: bool = False) -> dict[str, Any]:
         return prune_orphaned_worktrees_and_locks(self.repo_path, dry_run=dry_run)
 
-    def preflight_check(self) -> Dict[str, Any]:
+    def preflight_check(self) -> dict[str, Any]:
         return preflight_dag_dispatch_check(self.repo_path)
