@@ -28,16 +28,24 @@ from .webrtc_swarm_federation import (
     SubSwarmSession,
     WebRTCSwarmFederation,
 )
+from .thread_subscription_fanout import (
+    ReviewThreadEvent,
+    ThreadSubscriptionHub,
+    TicketRecord,
+)
 
 __all__ = [
     "DAGPipelineEngine",
     "FederatedPeerNode",
     "FederationMeshOrchestrator",
+    "ReviewThreadEvent",
     "STATION_CATALOG",
     "StationLoadBalancer",
     "StationNode",
     "StationReplica",
     "SubSwarmSession",
+    "ThreadSubscriptionHub",
+    "TicketRecord",
     "WebRTCSwarmFederation",
     "WorkflowTask",
     "compute_mesh_digest",
