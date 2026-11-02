@@ -33,6 +33,10 @@ from .thread_subscription_fanout import (
     ThreadSubscriptionHub,
     TicketRecord,
 )
+from .multi_repo_dependency_repair import (
+    BreakingSignatureChange,
+    MultiRepoDependencyRepair,
+)
 
 __all__ = [
     "DAGPipelineEngine",
