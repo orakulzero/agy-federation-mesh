@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -21,20 +21,20 @@ class BreakingSignatureChange:
 
     module_name: str
     symbol_name: str
-    old_params: List[str]
-    new_params: List[str]
-    required_added: List[str]
-    removed_params: List[str]
+    old_params: list[str]
+    new_params: list[str]
+    required_added: list[str]
+    removed_params: list[str]
 
 
 class MultiRepoDependencyRepair:
     """Analyzes cross-repository API signature changes and plans downstream call-site repairs (REQ-FM-DEPGRAPH-01)."""
 
     @staticmethod
-    def _extract_functions(source_code: str) -> Dict[str, Tuple[List[str], List[str]]]:
+    def _extract_functions(source_code: str) -> dict[str, tuple[list[str], list[str]]]:
         """Return mapping of function_name -> (all_params, required_params)."""
         tree = ast.parse(source_code)
-        funcs: Dict[str, Tuple[List[str], List[str]]] = {}
+        funcs: dict[str, tuple[list[str], list[str]]] = {}
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 raw_args = [
@@ -51,11 +51,11 @@ class MultiRepoDependencyRepair:
         module_name: str,
         before_code: str,
         after_code: str,
-    ) -> List[BreakingSignatureChange]:
+    ) -> list[BreakingSignatureChange]:
         """Compare AST function signatures between versions and return breaking changes (REQ-FM-DEPGRAPH-01)."""
         before_funcs = self._extract_functions(before_code)
         after_funcs = self._extract_functions(after_code)
-        changes: List[BreakingSignatureChange] = []
+        changes: list[BreakingSignatureChange] = []
 
         for sym_name, (old_params, _old_req) in before_funcs.items():
             if sym_name not in after_funcs:
@@ -78,15 +78,15 @@ class MultiRepoDependencyRepair:
 
     def build_cross_repo_repair_plan(
         self,
-        changes: List[BreakingSignatureChange],
-        dependent_files: Dict[str, Dict[str, str]],
-    ) -> Dict[str, Any]:
+        changes: list[BreakingSignatureChange],
+        dependent_files: dict[str, dict[str, str]],
+    ) -> dict[str, Any]:
         """Scan dependent repositories and locate call sites impacted by breaking changes (REQ-FM-DEPGRAPH-01)."""
         changes_by_symbol = {c.symbol_name: c for c in changes}
-        impacted_repos: Dict[str, List[Dict[str, Any]]] = {}
+        impacted_repos: dict[str, list[dict[str, Any]]] = {}
 
         for repo_name, files_map in dependent_files.items():
-            repo_sites: List[Dict[str, Any]] = []
+            repo_sites: list[dict[str, Any]] = []
             for file_path, code in files_map.items():
                 tree = ast.parse(code)
                 for node in ast.walk(tree):
@@ -127,11 +127,11 @@ class MultiRepoDependencyRepair:
 
     def generate_paired_pr_manifest(
         self,
-        plan: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
+        plan: dict[str, Any],
+    ) -> list[dict[str, Any]]:
         """Generate ordered PR manifest with upstream PRs followed by linked downstream PRs (REQ-FM-DEPGRAPH-01)."""
-        manifest: List[Dict[str, Any]] = []
-        upstream_repos: List[str] = []
+        manifest: list[dict[str, Any]] = []
+        upstream_repos: list[str] = []
         for change in plan.get("changes", []):
             if change.module_name not in upstream_repos:
                 upstream_repos.append(change.module_name)
