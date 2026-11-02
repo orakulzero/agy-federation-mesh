@@ -37,6 +37,12 @@ from .multi_repo_dependency_repair import (
     BreakingSignatureChange,
     MultiRepoDependencyRepair,
 )
+from .wasm_sandbox_executor import (
+    WasmEnvelopeValidation,
+    WasmExecutionResult,
+    WasmSandboxConfig,
+    WasmSandboxExecutor,
+)
 
 __all__ = [
     "DAGPipelineEngine",
@@ -50,6 +56,10 @@ __all__ = [
     "SubSwarmSession",
     "ThreadSubscriptionHub",
     "TicketRecord",
+    "WasmEnvelopeValidation",
+    "WasmExecutionResult",
+    "WasmSandboxConfig",
+    "WasmSandboxExecutor",
     "WebRTCSwarmFederation",
     "WorkflowTask",
     "compute_mesh_digest",
