@@ -14,7 +14,7 @@ import json
 import operator
 import re
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 WASM_PAGE_SIZE_BYTES = 65536
 WASM_MAGIC_HEADER = b"\x00asm"
@@ -34,7 +34,7 @@ class _DictAccessMixin:
     def get(self, key: str, default: Any = None) -> Any:
         return getattr(self, key, default)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)  # type: ignore[arg-type]
 
 
@@ -54,7 +54,7 @@ class WasmEnvelopeValidation(_DictAccessMixin):
 
     valid: bool
     format: str
-    violations: List[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -67,7 +67,7 @@ class WasmExecutionResult(_DictAccessMixin):
     fuel_consumed: int
     startup_time_us: float
     execution_receipt_sha256: str
-    violations: List[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
 
 
 class WasmSandboxExecutor:
@@ -85,12 +85,12 @@ class WasmSandboxExecutor:
     }
     _SAFE_UNARY_OPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
-    def __init__(self, config: Optional[WasmSandboxConfig] = None) -> None:
+    def __init__(self, config: WasmSandboxConfig | None = None) -> None:
         self.config = config or WasmSandboxConfig()
 
-    def validate_module_envelope(self, module_payload: Union[bytes, str]) -> WasmEnvelopeValidation:
+    def validate_module_envelope(self, module_payload: bytes | str) -> WasmEnvelopeValidation:
         """Validate WASM binary header or WAT module against capability policy (REQ-FM-WASM-01)."""
-        violations: List[str] = []
+        violations: list[str] = []
         if isinstance(module_payload, bytes):
             if not module_payload.startswith(WASM_MAGIC_HEADER):
                 return WasmEnvelopeValidation(False, "unknown", ["invalid_wasm_magic_header"])
@@ -109,7 +109,7 @@ class WasmSandboxExecutor:
                 violations.append(f"forbidden_host_import:{token}")
         return WasmEnvelopeValidation(len(violations) == 0, fmt, violations)
 
-    def _eval_safe_ast(self, node: ast.AST, env: Dict[str, Any]) -> Any:
+    def _eval_safe_ast(self, node: ast.AST, env: dict[str, Any]) -> Any:
         if isinstance(node, ast.Expression):
             return self._eval_safe_ast(node.body, env)
         if isinstance(node, ast.Constant):
@@ -127,7 +127,7 @@ class WasmSandboxExecutor:
         raise ValueError(f"Disallowed AST construct in sandbox: {type(node).__name__}")
 
     def _build_result(
-        self, task_id: str, status: str, output: Any, fuel_consumed: int, startup_time_us: float, violations: Optional[List[str]] = None
+        self, task_id: str, status: str, output: Any, fuel_consumed: int, startup_time_us: float, violations: list[str] | None = None
     ) -> WasmExecutionResult:
         receipt_payload = json.dumps(
             {"task_id": task_id, "status": status, "output": output, "fuel_consumed": fuel_consumed},
@@ -140,7 +140,7 @@ class WasmSandboxExecutor:
         )
 
     def execute_sandboxed_task(
-        self, task_id: str, code_payload: Union[bytes, str], inputs: Optional[Dict[str, Any]] = None
+        self, task_id: str, code_payload: bytes | str, inputs: dict[str, Any] | None = None
     ) -> WasmExecutionResult:
         """Execute task inside capability-gated, fuel-metered WASM sandbox (REQ-FM-WASM-01)."""
         t0 = time.perf_counter()
