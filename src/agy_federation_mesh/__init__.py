@@ -44,8 +44,10 @@ from .wasm_sandbox_executor import (
     WasmSandboxExecutor,
 )
 from .line_span_lock_oracle import LineSpanLockOracle
+from .ast_merge_driver import AstMergeDriver, merge_three_way
 
 __all__ = [
+    "AstMergeDriver",
     "DAGPipelineEngine",
     "FederatedPeerNode",
     "FederationMeshOrchestrator",
@@ -68,6 +70,7 @@ __all__ = [
     "execute_workflow_with_retry",
     "export_dag_dot",
     "export_dag_mermaid",
+    "merge_three_way",
     "SwarmWorkerProfile",
     "SpeculativeSwarmRouter",
     "compute_pareto_optimal_workers",
@@ -78,3 +81,4 @@ __all__ = [
 ]
 
 __version__ = "2.0.0"
+__v3_generation__ = "3.0.0"
