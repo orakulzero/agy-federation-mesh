@@ -43,11 +43,13 @@ from .wasm_sandbox_executor import (
     WasmSandboxConfig,
     WasmSandboxExecutor,
 )
+from .line_span_lock_oracle import LineSpanLockOracle
 
 __all__ = [
     "DAGPipelineEngine",
     "FederatedPeerNode",
     "FederationMeshOrchestrator",
+    "LineSpanLockOracle",
     "ReviewThreadEvent",
     "STATION_CATALOG",
     "StationLoadBalancer",
